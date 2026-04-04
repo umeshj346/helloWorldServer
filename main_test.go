@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
+	"os"
 	"reflect"
 	"testing"
 
+	"github.com/umeshj346/helloWorldServer/internal/db"
 	"github.com/umeshj346/helloWorldServer/internal/users"
+	"github.com/umeshj346/helloWorldServer/utils"
 )
 
 func Test_HandleWelcome(t *testing.T) {
@@ -124,10 +127,19 @@ func Test_HandleUserResponseHello(t *testing.T) {
 }
 
 func Test_HandleHelloHeader(t *testing.T) {
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+	
 	testFirstName, testLastName :=  "Test", "Man"
 	testEmail := "foo@bar"
 
-	testManager := users.NewManager()
 	testServer := server{
 		userManager: testManager,
 	}
@@ -159,8 +171,19 @@ func Test_HandleHelloHeader_WrongHeader(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
+	}
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
 	s := server {
-		userManager: users.NewManager(),
+		userManager: testManager,
 	}
 	s.handleHelloHeader(w, req)
 
@@ -180,8 +203,20 @@ func Test_HandleHelloHeader_NoHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/user/hello/", nil)
 
 	w := httptest.NewRecorder()
-	s := server{
-		userManager: users.NewManager(),
+
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
+	}
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
+	s := server {
+		userManager: testManager,
 	}
 	s.handleHelloHeader(w, req)
 
@@ -283,7 +318,17 @@ func Test_AddUser(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	testManager := users.NewManager()
+	err = utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
+	}
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
 	testServer := server {
 		userManager: testManager,
 	}
@@ -308,10 +353,23 @@ func Test_AddUser_BadHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/add-user", nil)
 	req.Header.Set("Content-Type", "application/html")
 	w := httptest.NewRecorder()
-	s := server {
-		userManager: users.NewManager(),
+
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
 	}
-	s.addUser(w, req)
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
+	testServer := server {
+		userManager: testManager,
+	}
+	testServer.addUser(w, req)
+
 	desiredCode := http.StatusUnsupportedMediaType
 	if w.Code != desiredCode {
 		t.Errorf("bad response code, wanted: %v, got: %v", desiredCode, w.Code)
@@ -321,18 +379,27 @@ func Test_AddUser_BadHeader(t *testing.T) {
 	if !bytes.Equal(w.Body.Bytes(), expectedMessage) {
 		t.Errorf("bad response message\nwanted: %q\ngot:%q", expectedMessage, w.Body.Bytes())
 	}
-	
 }
 
 func Test_GetUser(t *testing.T) {
 	testFirstName, testLastName, testEmail:= "Test", "Man", "foo@boo"
 
-	testManager := users.NewManager()
-	testServer := server{
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
+	}
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
+	testServer := server {
 		userManager: testManager,
 	}
 
-	err := testManager.AddUser(testFirstName, testLastName, testEmail)
+	err = testManager.AddUser(testFirstName, testLastName, testEmail)
 	if err != nil {
 		t.Fatalf("error adding user, err: %v", err)
 	}
@@ -381,10 +448,22 @@ func Test_GetUser_BadHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/add-user", nil)
 	req.Header.Set("Content-Type", "application/html")
 	w := httptest.NewRecorder()
-	s := server {
-		userManager: users.NewManager(),
+
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
 	}
-	s.getUser(w, req)
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
+	testServer := server {
+		userManager: testManager,
+	}
+	testServer.getUser(w, req)
 	desiredCode := http.StatusUnsupportedMediaType
 	if w.Code != desiredCode {
 		t.Errorf("bad response code, wanted: %v, got: %v", desiredCode, w.Code)
@@ -400,12 +479,22 @@ func Test_GetUser_BadHeader(t *testing.T) {
 func Test_GetUser_NoUser(t *testing.T) {
 	testFirstName, testLastName, testEmail:= "Test", "Man", "foo@boo"
 
-	testManager := users.NewManager()
-	testServer := server{
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error loading .env file, err: %v", err)
+	}
+
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := users.NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
+	testServer := server {
 		userManager: testManager,
 	}
 
-	err := testManager.AddUser(testFirstName, testLastName, testEmail)
+	err = testManager.AddUser(testFirstName, testLastName, testEmail)
 	if err != nil {
 		t.Fatalf("error adding user, err: %v", err)
 	}

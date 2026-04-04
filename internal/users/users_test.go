@@ -3,13 +3,25 @@ package users
 import (
 	"errors"
 	"net/mail"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
+
+	"github.com/umeshj346/helloWorldServer/internal/db"
+	"github.com/umeshj346/helloWorldServer/utils"
 )
 
 func Test_AddUser(t *testing.T) {
-	testManager := NewManager()
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
 
 	testFirstName, testLastName:= "Test", "Userman"
 	testEmail, err := mail.ParseAddress("foo@bar.com")
@@ -22,18 +34,44 @@ func Test_AddUser(t *testing.T) {
 		t.Fatalf("error creating user: %v", err)
 	}
 
-	if len(testManager.users) != 1 {
-		t.Errorf("bad test manager user count, expected: %d, got: %d", 1, len(testManager.users))
-		if len(testManager.users) < 1 {
-			t.Fatalf("users is empty")
-		}
+	sizeQuery := `
+		SELECT COUNT(*) FROM users
+	`
+	row := testManager.db.QueryRow(sizeQuery)
+	var tbLen int
+	err = row.Scan(&tbLen)
+	if err != nil {
+		t.Fatalf("error reading no. of entries in users table: %v", err)
 	}
+	if tbLen != 1 {
+		t.Fatalf("bad test Manager users count, wanted: 1, got: %v", tbLen)
+	}
+
+	query := `
+		SELECT first_name, last_name, email
+		FROM users
+		WHERE first_name = $1 and last_name = $2 and email = $3
+	`
+	var foundUser User
+	var email string
+
+	row = testManager.db.QueryRow(query, testFirstName, testLastName, testEmail.Address)
+	err = row.Scan(&foundUser.FirstName, &foundUser.LastName, &email)
+	if err != nil {
+		t.Fatalf("error extracting data from row: %v", err)
+	}
+
+	parsedResultEmail, err := mail.ParseAddress(email)
+	if err != nil {
+		t.Fatalf("error parsing the email: %v", err)
+	}
+	foundUser.Email = *parsedResultEmail
+
 	expUser := User{
 		FirstName: testFirstName, 
 		LastName: testLastName, 
 		Email:  *testEmail,
 	}
-	foundUser := testManager.users[0]
 
 	if !reflect.DeepEqual(expUser, foundUser) {
 		t.Errorf("added user data is not correct\nexp: %+v\ngot: %+v", expUser, foundUser)
@@ -41,12 +79,21 @@ func Test_AddUser(t *testing.T) {
 }
 
 func Test_Adduser_InvalidEmail(t *testing.T) {
-	testManager := NewManager()
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
 
 	testFirstName, testLastName:= "Test", "Userman"
 	testEmail := "foobar"
 
-	err := testManager.AddUser(testFirstName, testLastName, testEmail)
+	err = testManager.AddUser(testFirstName, testLastName, testEmail)
 	if err == nil  {
 		t.Fatalf("no error for invalid email(%v)", testEmail)
 	} else {
@@ -56,13 +103,30 @@ func Test_Adduser_InvalidEmail(t *testing.T) {
 		}
 	}
 
-	if len(testManager.users) > 0 {
-		t.Errorf("bad test manager user count, exp: %d, got : %d", 0, len(testManager.users))
+	sizeQuery := `
+		SELECT COUNT(*) FROM users
+	`
+	row := testManager.db.QueryRow(sizeQuery)
+	var tbLen int
+	err = row.Scan(&tbLen)
+	if err != nil {
+		t.Fatalf("error reading no. of entries in users table: %v", err)
+	}
+	if tbLen != 0 {
+		t.Fatalf("bad test Manager users count, wanted: 1, got: %v", tbLen)
 	}
 }
 
 func Test_AddUser_MultipleCalls(t *testing.T) {
-	testManager := NewManager()
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
 
 	testFirstName, testLastName, testEmail := "foo", "bar", "foo@bar"
 
@@ -77,20 +141,35 @@ func Test_AddUser_MultipleCalls(t *testing.T) {
 	}
 
 	wg.Wait()
-	if len(testManager.users) != 1 {
-		t.Errorf("bad test manager user count, exp: %d, got : %d", 0, len(testManager.users))
+	sizeQuery := `
+		SELECT COUNT(*) FROM users
+	`
+	row := testManager.db.QueryRow(sizeQuery)
+	var tbLen int
+	err = row.Scan(&tbLen)
+	if err != nil {
+		t.Fatalf("error reading no. of entries in users table: %v", err)
 	}
-
-	
+	if tbLen != 1 {
+		t.Fatalf("bad test Manager users count, wanted: 1, got: %v", tbLen)
+	}	
 }
 
 func Test_AddUser_EmptyFirstName(t *testing.T) {
-	testManager := NewManager()
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
 
 	testFirstName, testLastName:= "", "Userman"
 	testEmail := "foo@bar.com"
 
-	err := testManager.AddUser(testFirstName, testLastName, testEmail)
+	err = testManager.AddUser(testFirstName, testLastName, testEmail)
 	if err == nil  {
 		t.Fatalf("no error for empty first name")
 	} else {
@@ -100,18 +179,35 @@ func Test_AddUser_EmptyFirstName(t *testing.T) {
 		}
 	}
 
-	if len(testManager.users) > 0 {
-		t.Errorf("bad test manager user count, exp: %d, got : %d", 0, len(testManager.users))
+	sizeQuery := `
+		SELECT COUNT(*) FROM users
+	`
+	row := testManager.db.QueryRow(sizeQuery)
+	var tbLen int
+	err = row.Scan(&tbLen)
+	if err != nil {
+		t.Fatalf("error reading no. of entries in users table: %v", err)
+	}
+	if tbLen != 0 {
+		t.Fatalf("bad test Manager users count, wanted: 1, got: %v", tbLen)
 	}
 }
 
 func Test_AddUser_EmptyLastName(t *testing.T) {
-	testManager := NewManager()
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
 
 	testFirstName, testLastName:= "Test", ""
 	testEmail := "foo@bar.com"
 
-	err := testManager.AddUser(testFirstName, testLastName, testEmail)
+	err = testManager.AddUser(testFirstName, testLastName, testEmail)
 	if err == nil  {
 		t.Fatalf("no error for empty last name")
 	} else {
@@ -121,18 +217,35 @@ func Test_AddUser_EmptyLastName(t *testing.T) {
 		}
 	}
 
-	if len(testManager.users) > 0 {
-		t.Errorf("bad test manager user count, exp: %d, got : %d", 0, len(testManager.users))
+	sizeQuery := `
+		SELECT COUNT(*) FROM users
+	`
+	row := testManager.db.QueryRow(sizeQuery)
+	var tbLen int
+	err = row.Scan(&tbLen)
+	if err != nil {
+		t.Fatalf("error reading no. of entries in users table: %v", err)
+	}
+	if tbLen != 0 {
+		t.Fatalf("bad test Manager users count, wanted: 1, got: %v", tbLen)
 	}
 }
 
 func Test_AddUser_DuplicateUser(t *testing.T) {
-	testManager := NewManager()
-	
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+
 	testFirstName, testLastName:= "Test", "UserMan"
 	testEmail := "foo@bar.com"
 
-	err := testManager.AddUser(testFirstName, testLastName, testEmail)
+	err = testManager.AddUser(testFirstName, testLastName, testEmail)
 	if err != nil {
 		t.Fatalf("error adding user, err: %v", err)
 	}
@@ -147,16 +260,43 @@ func Test_AddUser_DuplicateUser(t *testing.T) {
 		}
 	}
 
-	if len(testManager.users) > 1 {
-		t.Errorf("bad test manager user count, exp: %d, got : %d", 0, len(testManager.users))
+	sizeQuery := `
+		SELECT COUNT(*) FROM users
+	`
+	row := testManager.db.QueryRow(sizeQuery)
+	var tbLen int
+	err = row.Scan(&tbLen)
+	if err != nil {
+		t.Fatalf("error reading no. of entries in users table: %v", err)
+	}
+	if tbLen != 1 {
+		t.Fatalf("bad test Manager users count, wanted: 1, got: %v", tbLen)
 	}
 }
 
 func Test_GetUserByName(t *testing.T) {
-	testManager := NewManager()
-	err := testManager.AddUser("foo", "bar", "foo.bar@g.com")
+	err := utils.LoadEnv()
+	if err != nil {
+		t.Fatalf("error opening .env file, err: %v", err)
+	}
+	testDb := db.NewPostgresDB(os.Getenv("TEST_DATABASE_URL"))
+	testManager := NewManager(testDb)
+	defer func() {
+		testDb.Exec(`DELETE FROM users`)
+	}()
+	
+	err = testManager.AddUser("foo", "bar", "foo.bar@g.com")
 	if err != nil {
 		t.Fatalf("error adding user, err: %v", err)
+	}
+	testEmail, err := mail.ParseAddress("foo.bar@g.com")
+	if err != nil {
+		t.Fatalf("error parsing email address, err: %v", err)
+	}
+	testUser := User{
+		FirstName: "foo",
+		LastName: "bar",
+		Email: *testEmail,
 	}
 
 	err = testManager.AddUser("foo", "baz", "foo.baz@g.com")
@@ -183,7 +323,7 @@ func Test_GetUserByName(t *testing.T) {
 		"simple": {
 			first: 	"foo",
 			last: 	"bar",
-			expected: &testManager.users[0],
+			expected: &testUser,
 			expectedErr: nil,
 		},
 		"first name lookup": {
@@ -219,15 +359,14 @@ func Test_GetUserByName(t *testing.T) {
 	}
 	for name, test := range tests {
 		result, err := testManager.GetUserByName(test.first, test.last)
-		if !reflect.DeepEqual(result, test.expected) {
+		if !reflect.DeepEqual(result, test.expected){
 			t.Errorf("%s: invalid result\nexpected: %+v\ngot: %+v\n", 
 						name, test.expected, result)
 		}
-		
+
 		if !errors.Is(err, test.expectedErr) {
 			t.Errorf("%s: invalid error reported\nexpected: %v\ngot: %v", name, test.expectedErr, err)
 		}
-
 		
 	}
 }

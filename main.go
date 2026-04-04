@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+	"github.com/umeshj346/helloWorldServer/internal/db"
 	"github.com/umeshj346/helloWorldServer/internal/users"
 )
 
@@ -29,7 +31,13 @@ type server struct {
 }
 
 func main() {
-    manager := users.NewManager()
+    err := godotenv.Load()
+    if err != nil {
+        slog.Error("error loading env file")
+        os.Exit(1)
+    }
+    db := db.NewPostgresDB(os.Getenv("DATABASE_URL"))
+    manager := users.NewManager(db)
     defer manager.Shutdown()
 
     s := server {
@@ -57,7 +65,7 @@ func main() {
         err := httpServer.ListenAndServe()
         if err != nil && !errors.Is(err, http.ErrServerClosed) {
             slog.Error("HTTP server error", "err", err)
-            os.Exit(1)
+            os.Exit(2)
         }
     }()
 

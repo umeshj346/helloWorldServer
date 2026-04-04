@@ -1,6 +1,7 @@
 package users
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,12 +19,12 @@ type User struct {
 }
 
 type Manager struct {
-	users []User
+	db *sql.DB
 	rw sync.RWMutex
 }
 
-func NewManager() *Manager {
-	return &Manager{}
+func NewManager(db *sql.DB) *Manager {
+	return &Manager{db: db}
 }
 
 func (m *Manager) AddUser(firstName, lastName, email string) error {
@@ -49,34 +50,76 @@ func (m *Manager) AddUser(firstName, lastName, email string) error {
 	if err != nil { 
 		return fmt.Errorf("invalid email: %s", email)
 	}
+	
+	query := `
+		INSERT INTO users (first_name, last_name, email)
+		VALUES ($1, $2, $3)
+	`
 
-	newUser := User {
-		FirstName: firstName,
-		LastName: lastName,
-		Email: *parsedEmail,
+	_, err = m.db.Exec(query, firstName, lastName, parsedEmail.Address)
+	if err != nil {
+		return fmt.Errorf("error inserting into database: %s", err)
 	}
-	m.users = append(m.users, newUser)
+
 	return nil
 }
 
 func (m *Manager) getUserByNameUnsafe(firstName, lastName string) (*User, error) {
-	for i, user:= range m.users {
-		if user.FirstName == firstName && user.LastName == lastName {
-			return &m.users[i], nil
+	query := `
+		SELECT first_name, last_name, email 
+		from users
+		where first_name = $1 and last_name = $2
+	`
+
+	row := m.db.QueryRow(query, firstName, lastName)
+
+	foundUser := &User{}
+	var email string
+
+	err := row.Scan(&foundUser.FirstName, &foundUser.LastName, &email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows){
+			return nil, ErrNoResultFound
 		}
+		return nil, err
 	}
-	return nil, ErrNoResultFound
+
+	parsedEmail, err := mail.ParseAddress(email)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing the mail Address, err: %v", err)
+	}
+	foundUser.Email = *parsedEmail
+	return foundUser, nil
 }
 
 func (m *Manager) GetUserByName(firstName, lastName string) (*User, error) {
 	m.rw.RLock()
 	defer m.rw.RUnlock()
-	for i, user:= range m.users {
-		if user.FirstName == firstName && user.LastName == lastName {
-			return &m.users[i], nil
+	query := `
+		SELECT first_name, last_name, email 
+		from users
+		where first_name = $1 and last_name = $2
+	`
+
+	row := m.db.QueryRow(query, firstName, lastName)
+
+	foundUser := &User{}
+	var email string
+
+	err := row.Scan(&foundUser.FirstName, &foundUser.LastName, &email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows){
+			return nil, ErrNoResultFound
 		}
+		return nil, err
 	}
-	return nil, ErrNoResultFound
+
+	parsedEmail, err := mail.ParseAddress(email)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing the mail Address, err: %v", err)
+	}
+	foundUser.Email = *parsedEmail
+	return foundUser, nil
 }
 
 func (m *Manager) Shutdown() {

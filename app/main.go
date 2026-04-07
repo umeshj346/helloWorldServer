@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -16,38 +18,45 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/umeshj346/helloWorldServer/internal/db"
+	"github.com/umeshj346/helloWorldServer/domain"
+	"github.com/umeshj346/helloWorldServer/internal/db/postgres"
 	"github.com/umeshj346/helloWorldServer/internal/users"
 )
 
-type UserData struct {
-    FirstName   string
-    LastName    string
-    Email       string
+type server struct {
+    service *users.Service
 }
 
-type server struct {
-    userManager *users.Manager
+func init() {
+    err := godotenv.Load()
+    if err != nil {
+        log.Fatalf("error opening .env file, err: %v", err)
+    }
 }
 
 func main() {
-    err := godotenv.Load()
-    if err != nil {
-        slog.Error("error loading env file")
-        os.Exit(1)
-    }
-    db := db.NewPostgresDB(os.Getenv("DATABASE_URL"))
-    manager := users.NewManager(db)
-    defer manager.Shutdown()
+    dbUser := os.Getenv("DATABASE_USER")
+    dbPass := os.Getenv("DATABASE_PASS")
+    dbHost := os.Getenv("DATABASE_HOST")
+    dbPort := os.Getenv("DATABASE_PORT")
+    dbName := os.Getenv("DATABASE_NAME")
+    connection := fmt.Sprintf("%s:%s@%s:%s/%s",
+                    dbUser, dbPass, dbHost, dbPort, dbName)
+    
+    val := url.Values{}
+    val.Add("sslmode", "disable")
+    dstn := fmt.Sprintf("%s?%s", connection, val.Encode())
+    db := postgres.NewPostgresDB(dstn)
+    repo := postgres.NewUserPgRepository(db)
+    service := users.NewService(repo)
+    defer service.Shutdown()
 
-    s := server {
-        userManager: manager,
-    }
+    s := server {service}
 
     mux := http.NewServeMux()
-
+    address := os.Getenv("SERVER_ADDR")
     httpServer := &http.Server{
-        Addr:    ":80",
+        Addr:    address,
         Handler: mux,
     }
 
@@ -103,7 +112,7 @@ func writeHelloUser(w http.ResponseWriter, userName string) {
     }
 }
 
-func writeHelloUserData(w http.ResponseWriter, userData *UserData) {
+func writeHelloUserData(w http.ResponseWriter, userData *domain.UserData) {
     output := fmt.Sprintf("Hello %v %v!\nYour Email is %v",
                             userData.FirstName, userData.LastName, userData.Email)  
 
@@ -114,11 +123,8 @@ func writeHelloUserData(w http.ResponseWriter, userData *UserData) {
     }
 }
 
-func convertUserToUserData(u *users.User) *UserData {
-    if u == nil {
-        return nil
-    }
-    return &UserData{
+func convertUserToUserData(u domain.User) *domain.UserData {
+    return &domain.UserData{
         FirstName: u.FirstName,
         LastName: u.LastName,
         Email: u.Email.Address,
@@ -166,10 +172,10 @@ func handleUserResponseHello(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleHelloHeader(w http.ResponseWriter, r *http.Request) {
     firstName, lastName := r.Header.Get("userFirst"), r.Header.Get("userLast")
-    user, err := s.userManager.GetUserByName(firstName, lastName)
+    user, err := s.service.GetUser(r.Context(), firstName, lastName)
 
     if err != nil {
-        if err == users.ErrNoResultFound {
+        if err == domain.ErrNoResultFound {
             http.Error(w, "no users found", http.StatusNotFound)
         } else {
             slog.Error("error retrieving user", "err", err)
@@ -177,7 +183,7 @@ func (s *server) handleHelloHeader(w http.ResponseWriter, r *http.Request) {
         }
         return
     }
-    converted := convertUserToUserData(user)
+    converted := convertUserToUserData(*user)
     writeHelloUserData(w, converted)
 }
 
@@ -195,7 +201,7 @@ func handleJson(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    var reqData UserData
+    var reqData domain.UserData
     err = json.Unmarshal(byteData, &reqData) 
     if err != nil {
         slog.Error("error unmarshalling request body", "err", err)
@@ -222,7 +228,7 @@ func (s *server) addUser(w http.ResponseWriter, r *http.Request) {
     decoder := json.NewDecoder(requestBody)
     decoder.DisallowUnknownFields()
 
-    var u UserData
+    var u domain.UserData
     err := decoder.Decode(&u)
     
     if err != nil {
@@ -231,7 +237,7 @@ func (s *server) addUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    err = s.userManager.AddUser(u.FirstName, u.LastName, u.Email)
+    err = s.service.AddUser(r.Context(), &u)
     if err != nil {
         http.Error(w, fmt.Sprintf("error adding user: %v\n", err), http.StatusBadRequest)
         return
@@ -251,7 +257,7 @@ func (s *server) getUser(w http.ResponseWriter, r *http.Request) {
     decoder := json.NewDecoder(requestBody)
     decoder.DisallowUnknownFields()
 
-    var u UserData
+    var u domain.UserData
     err := decoder.Decode(&u)
     
     if err != nil {
@@ -260,9 +266,9 @@ func (s *server) getUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    foundUser, err := s.userManager.GetUserByName(u.FirstName, u.LastName)
+    foundUser, err := s.service.GetUser(r.Context(), u.FirstName, u.LastName)
     if err != nil {
-        if errors.Is(err, users.ErrNoResultFound) {
+        if errors.Is(err, domain.ErrNoResultFound) {
             http.Error(w, "no users found", http.StatusNotFound)
         } else {
             slog.Error("error retrieving user", "err", err)
@@ -271,7 +277,7 @@ func (s *server) getUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    converted := convertUserToUserData(foundUser)
+    converted := convertUserToUserData(*foundUser)
     marshalled, err := json.Marshal(*converted)
     if err != nil {
         slog.Error("error marshaling getUser reposne", "err", err)

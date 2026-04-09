@@ -1,4 +1,4 @@
-package users
+package mocks
 
 import (
 	"context"
@@ -38,4 +38,8 @@ func (mr *MockRepo) GetUserByName(ctx context.Context, firstName, lastName strin
 
 func (mr *MockRepo) Shutdown() {
 	fmt.Println("Mock Repo shut down")
+}
+
+func (mr *MockRepo) GetCountOfUsers(ctx context.Context) (int , error) {
+	return len(mr.users), nil
 }

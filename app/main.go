@@ -10,7 +10,6 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -20,7 +19,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/umeshj346/helloWorldServer/domain"
 	"github.com/umeshj346/helloWorldServer/internal/db/postgres"
-	"github.com/umeshj346/helloWorldServer/internal/users"
+	"github.com/umeshj346/helloWorldServer/users"
 )
 
 type server struct {
@@ -40,13 +39,13 @@ func main() {
     dbHost := os.Getenv("DATABASE_HOST")
     dbPort := os.Getenv("DATABASE_PORT")
     dbName := os.Getenv("DATABASE_NAME")
-    connection := fmt.Sprintf("%s:%s@%s:%s/%s",
+    connection := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
                     dbUser, dbPass, dbHost, dbPort, dbName)
-    
-    val := url.Values{}
-    val.Add("sslmode", "disable")
-    dstn := fmt.Sprintf("%s?%s", connection, val.Encode())
-    db := postgres.NewPostgresDB(dstn)
+    db := postgres.NewPostgresDB(connection)
+    if db == nil {
+        slog.Error("error accessing database")
+        os.Exit(1)
+    }
     repo := postgres.NewUserPgRepository(db)
     service := users.NewService(repo)
     defer service.Shutdown()
